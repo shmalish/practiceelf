@@ -28,6 +28,8 @@ pe.ipynb -- python file that breaks a binary into base64 chunks and converts the
 
 ## open source libraries used in the  project
 Gozxing -- QR code decoder
+
 Segno -- QR code encoder in python which allowed me to use v40 
+
 Elf-to_shellcode -- This was used to try turn a binary into "shellcode" but it didn't really work but I'm leaving it in here in case anyone wants to try get it to work.
 
